@@ -1,2 +1,3 @@
 hostname: "berryaudio"
 timezone: "Europe/Berlin"
+idle_album_art: true

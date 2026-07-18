@@ -96,6 +96,23 @@ class DBConnection:
         sql = "INSERT OR IGNORE INTO extensions (name, config) VALUES (?, ?)"
         params = (name, json.dumps(config))
         self.execute(sql, params)
+
+        # Merge newly added default keys into existing extension configs so
+        # upgrades pick up options that were not present at first install.
+        row = self.fetchone("SELECT config FROM extensions WHERE name = ?", (name,))
+        if row and config:
+            existing = json.loads(row["config"])
+            changed = False
+            for key, value in config.items():
+                if key not in existing:
+                    existing[key] = value
+                    changed = True
+            if changed:
+                self.execute(
+                    "UPDATE extensions SET config = ? WHERE name = ?",
+                    (json.dumps(existing), name),
+                )
+
         logger.debug(f"Initialized extension {name} in database")
         return True
 

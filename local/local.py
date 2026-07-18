@@ -213,6 +213,30 @@ class LocalExtension(SourceActor):
                 result[table] = [Album(**self.build_album(row)) for row in rows]
         return result
 
+    def on_albums_with_art(self, limit: int = 200) -> list[dict]:
+        """Return albums that have real cover art on disk (for idle slideshow)."""
+        sql = QUERIES["album"].rstrip(";") % (
+            "a.image IS NOT NULL AND TRIM(a.image) != ''"
+        )
+        rows = self._db.fetchall(sql)
+        results = []
+        for row in rows:
+            images = self._resolve_images(
+                ALBUM_IMAGES_DIR, ALBUM_IMAGES_WEB_PATH, row["image"]
+            )
+            if not images:
+                continue
+            results.append(
+                {
+                    "uri": f"album:{row['id']}",
+                    "name": row["name"],
+                    "image": images[0].uri,
+                }
+            )
+            if len(results) >= limit:
+                break
+        return results
+
     def on_directory(
         self,
         uri: str | None = None,
