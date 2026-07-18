@@ -15,7 +15,16 @@
     "address": null,
     "dtoverlay": null,
     "cmdline": null,
-    "xrandr": "--output HDMI-1 --auto --primary"
+    "xrandr": "--output HDMI-1 --primary --mode 1024x600 --pos 0x0 --output HDMI-2 --off"
+  },
+  {
+    "device": "qdtech_mpi7002_hdmi2",
+    "name": "QDTECH MPI7002 HDMI-2 (1024x600)",
+    "description": "7\" QDTECH/MPI7002 HDMI touch panel on HDMI-2 (fallback)",
+    "address": null,
+    "dtoverlay": null,
+    "cmdline": null,
+    "xrandr": "--output HDMI-2 --primary --mode 1024x600 --pos 0x0 --output HDMI-1 --off"
   },
   {
     "device": "generic_dsi",

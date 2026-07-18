@@ -559,7 +559,12 @@ class DisplayExtension(Actor):
             self._controller = DisplaySSD1322(contrast=255)
         elif device == "ssd1306":
             self._controller = DisplaySSD1306(contrast=255)
-        elif device in ("waveshare_28_dsi", "generic_hdmi", "generic_dsi"):
+        elif device in (
+            "waveshare_28_dsi",
+            "generic_hdmi",
+            "generic_dsi",
+            "qdtech_mpi7002_hdmi2",
+        ):
             pass
         else:
             logger.error(f"Display device '{device}' not supported")
