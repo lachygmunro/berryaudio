@@ -23,6 +23,9 @@ class NetworkExtension(Actor):
         self._core = core
         self._db = db
         self._config = config
+        self._apmode_enabled = bool(
+            self._config.get("network", {}).get("apmode_enabled", False)
+        )
         self._apmode_password = str(self._config["network"]["apmode_password"])
         self._hostname = str(self._config["system"]["hostname"])
         self._devices = []
@@ -48,6 +51,10 @@ class NetworkExtension(Actor):
     async def _monitor_network(self):
         while self.running:
             try:
+                if not self._apmode_enabled:
+                    await asyncio.sleep(CONFIG_WIFI_CHECK_INTERVAL)
+                    continue
+
                 if not self._is_connected():
                     if not self._hotspot_active:
                         if not self._conn_in_progress:
