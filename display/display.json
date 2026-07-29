@@ -10,8 +10,8 @@
   },
     {
     "device": "generic_hdmi",
-    "name": "Generic HDMI Display",
-    "description": "Raspberry Pi HDMI Output",
+    "name": "Generic HDMI Display / QDTECH HDMI-1 (1024x600)",
+    "description": "Raspberry Pi HDMI Output (QDTECH MPI7002 on HDMI-1)",
     "address": null,
     "dtoverlay": null,
     "cmdline": null,

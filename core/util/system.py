@@ -82,31 +82,30 @@ class SystemUtil:
         if xrandr is not None:
             # Chromium kiosk instead of Electron AppImage: AppImage does not
             # receive XI2 touch clicks on QDTECH/MPI700-class HDMI panels.
+            # Keep chromium as the session client via exec so X does not exit
+            # if a helper command fails.
             lines = [
                 "#!/bin/sh",
                 "xset s off",
                 "xset -dpms",
                 "xset s noblank",
-                f"xrandr {xrandr}",
+                "unclutter -idle 0 -root &",
+                f"xrandr {xrandr} || true",
                 # Map QDTECH USB touch to the active HDMI output when present
                 'TID=$(xinput list | sed -n \'s/.*QDTECH.*id=\\([0-9]\\+\\).*/\\1/p\')',
                 'OUT=$(xrandr --query | awk \'/ connected/{print $1; exit}\')',
                 '[ -n "$TID" ] && [ -n "$OUT" ] && xinput map-to-output "$TID" "$OUT"',
-                "chromium \\",
+                "exec chromium \\",
                 "  --kiosk \\",
                 "  --app=http://127.0.0.1/ \\",
                 "  --touch-events=enabled \\",
-                "  --force-device-scale-factor=1.4 \\",
+                "  --force-device-scale-factor=1 \\",
                 "  --window-position=0,0 \\",
                 "  --window-size=1024,600 \\",
                 "  --no-first-run \\",
                 "  --noerrdialogs \\",
                 "  --disable-infobars \\",
-                "  --disable-gpu \\",
-                "  > /tmp/chromium.log 2>&1 &",
-                "sleep 4",
-                "xdotool search --onlyvisible --class chromium windowmove 0 0 windowsize 1024 600",
-                "wait",
+                "  > /tmp/chromium.log 2>&1",
             ]
 
         lines.append("# Development")

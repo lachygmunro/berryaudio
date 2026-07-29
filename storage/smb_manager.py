@@ -431,6 +431,49 @@ class StorageSmbManager:
         self._smb_shares = storages
         return storages
 
+    @staticmethod
+    def mount_point_for(dev: str) -> str:
+        path = dev.replace("smb://", "")
+        mount_name = path.replace("/", "_").replace(" ", "_").replace("'", "")
+        return f"/media/pi/{mount_name}"
+
+    def is_mounted(self, dev: str) -> bool:
+        if not dev.startswith("smb://"):
+            return False
+        mount_point = self.mount_point_for(dev)
+        try:
+            with open("/proc/mounts", "r") as f:
+                if not any(mount_point in line for line in f):
+                    return False
+            psutil.disk_usage(mount_point)
+            return True
+        except Exception:
+            return False
+
+    async def drop_stale_mount(self, dev: str) -> None:
+        """Lazily unmount a share that is listed but no longer reachable."""
+        if not dev.startswith("smb://"):
+            return
+        mount_point = self.mount_point_for(dev)
+        try:
+            with open("/proc/mounts", "r") as f:
+                listed = any(mount_point in line for line in f)
+            if not listed:
+                return
+            try:
+                psutil.disk_usage(mount_point)
+                return
+            except Exception:
+                logger.warning(f"Stale SMB mount detected for '{dev}', forcing unmount")
+                subprocess.run(
+                    ["sudo", "umount", "-l", mount_point],
+                    capture_output=True,
+                    text=True,
+                )
+                self._smb_shares.pop(dev, None)
+        except Exception as e:
+            logger.debug(f"Unable to clear stale mount for '{dev}': {e}")
+
     async def mount_shared(
         self, devs: list[str], username: str = None, password: str = ""
     ) -> bool:
@@ -447,24 +490,42 @@ class StorageSmbManager:
                     raise ValueError("DB not initialized")
 
                 path = dev.replace("smb://", "")
-                mount_name = path.replace("/", "_").replace(" ", "_").replace("'", "")
-                mount_point = f"/media/pi/{mount_name}"
+                mount_point = self.mount_point_for(dev)
+
+                await self.drop_stale_mount(dev)
 
                 with open("/proc/mounts", "r") as f:
                     if any(mount_point in line for line in f):
                         logger.info(f"'{dev}' already mounted, skipping")
                         is_mounted = True
 
+                save_username = (
+                    username if username is not None else self._remote_username
+                )
+                save_password = (
+                    password if username is not None else (self._remote_password or "")
+                )
+
                 if not is_mounted:
                     subprocess.run(["sudo", "mkdir", "-p", mount_point], check=True)
-                    options = "vers=2.0,sec=ntlmssp,uid=1000,gid=1000"
+                    # echo_interval helps detect dead servers so remount can recover.
+                    options = (
+                        "vers=2.0,sec=ntlmssp,uid=1000,gid=1000,echo_interval=15"
+                    )
 
                     if username:
                         options += f",username={username},password={password}"
                     elif self._remote_username and self._remote_password:
-                        options += f",username={self._remote_username},password={self._remote_password}"
+                        options += (
+                            f",username={self._remote_username},"
+                            f"password={self._remote_password}"
+                        )
+                        save_username = self._remote_username
+                        save_password = self._remote_password or ""
                     else:
                         options += ",guest"
+                        save_username = None
+                        save_password = ""
 
                     result = subprocess.run(
                         [
@@ -487,15 +548,15 @@ class StorageSmbManager:
                             raise PermissionError(
                                 f"Permission denied mounting '{dev}' — check credentials"
                             )
-                        elif "16":
+                        elif "16" in stderr:
                             raise ValueError(
                                 f"'{dev}' is already mounted or resource is busy"
                             )
-                        elif "115":
+                        elif "115" in stderr:
                             raise ConnectionError(
                                 f"Timeout connecting to '{dev}' — check network"
                             )
-                        elif "2":
+                        elif "2" in stderr:
                             raise FileNotFoundError(f"Share not found: '{dev}'")
                         else:
                             raise ConnectionError(f"Mount failed for '{dev}': {stderr}")
@@ -522,8 +583,8 @@ class StorageSmbManager:
                 config_storage = config.get(self._name, {}).get("smb_clients", {}) or {}
                 if dev not in config_storage:
                     config_storage[str(dev)] = {
-                        "username": self._remote_username,
-                        "password": self._remote_password,
+                        "username": save_username,
+                        "password": save_password,
                     }
                 self._db.set_config({self._name: {"smb_clients": config_storage}})
 
@@ -554,8 +615,7 @@ class StorageSmbManager:
                 raise ValueError("DB not initialized")
 
             path = dev.replace("smb://", "")
-            mount_name = path.replace("/", "_").replace(" ", "_").replace("'", "")
-            mount_point = f"/media/pi/{mount_name}"
+            mount_point = self.mount_point_for(dev)
 
             with open("/proc/mounts", "r") as f:
                 if not any(mount_point in line for line in f):

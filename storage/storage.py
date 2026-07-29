@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import subprocess
 
 from pathlib import Path
 from core.actor import SourceActor
@@ -22,6 +24,8 @@ ALLOWED_FILE_EXT = [
     ".dsf",
     ".dsf",
 ]
+# Wait for LAN before first remount; keep checking so drops recover.
+SMB_REMOUNT_INTERVAL_S = 10
 
 
 class StorageExtension(SourceActor):
@@ -44,6 +48,8 @@ class StorageExtension(SourceActor):
             password=self._password,
         )
         self._storage = StorageManager(name=self._name, core=self._core, db=self._db)
+        self._remount_task = None
+        self._auth_failed_devs = set()
         self._source = Source(
             name="Storage",
             uri=self._name,
@@ -58,6 +64,89 @@ class StorageExtension(SourceActor):
             ],
             state={},
         )
+
+    @staticmethod
+    def _is_lan_online() -> bool:
+        """True when Wi-Fi/Ethernet is connected to a real LAN (not hotspot)."""
+        try:
+            result = subprocess.run(
+                ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION", "device"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split(":")
+                if len(parts) < 3:
+                    continue
+                dtype, state, connection = parts[0], parts[1], parts[2]
+                if state != "connected":
+                    continue
+                if dtype not in ("wifi", "ethernet"):
+                    continue
+                if connection and "hotspot" in connection.lower():
+                    continue
+                return True
+            return False
+        except Exception as e:
+            logger.debug(f"LAN online check failed: {e}")
+            return False
+
+    def _saved_smb_clients(self) -> dict:
+        clients = (
+            self._db.get_config().get(self._name, {}).get("smb_clients", {}) or {}
+        )
+        self._config.setdefault(self._name, {})["smb_clients"] = clients
+        return clients
+
+    async def _remount_saved_smb_clients(self) -> None:
+        clients = self._saved_smb_clients()
+        if not clients:
+            return
+
+        for dev, creds in clients.items():
+            if dev in self._auth_failed_devs:
+                continue
+            try:
+                await self._smb.drop_stale_mount(dev)
+                if self._smb.is_mounted(dev):
+                    continue
+                await self._smb.mount_shared(
+                    devs=[dev],
+                    username=creds.get("username"),
+                    password=creds.get("password", ""),
+                )
+                logger.info(f"Remounted SMB share '{dev}'")
+            except PermissionError as e:
+                self._auth_failed_devs.add(dev)
+                logger.error(f"SMB remount auth failed for '{dev}': {e}")
+            except (
+                ValueError,
+                ConnectionError,
+                FileNotFoundError,
+            ) as e:
+                logger.warning(f"SMB remount deferred for '{dev}': {e}")
+            except Exception as e:
+                logger.error(f"SMB remount failed for '{dev}': {e}")
+
+    async def _smb_remount_loop(self) -> None:
+        was_online = False
+        while self.running:
+            try:
+                online = self._is_lan_online()
+                if online:
+                    if not was_online:
+                        self._auth_failed_devs.clear()
+                        logger.info("Network online — remounting saved SMB shares")
+                    await self._remount_saved_smb_clients()
+                elif was_online:
+                    logger.info("Network offline — pausing SMB remount")
+                was_online = online
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"SMB remount monitor error: {e}")
+            await asyncio.sleep(SMB_REMOUNT_INTERVAL_S)
 
     async def on_config_update(self, config):
         updated_config = config[self._name]
@@ -77,22 +166,8 @@ class StorageExtension(SourceActor):
         )
 
     async def on_start(self):
-        config_smb_clients = self._config.get(self._name, {}).get("smb_clients", {})
-        if config_smb_clients:
-            for dev, creds in config_smb_clients.items():
-                try:
-                    await self._smb.mount_shared(
-                        devs=[dev],
-                        username=creds.get("username"),
-                        password=creds.get("password", ""),
-                    )
-                except (
-                    ValueError,
-                    PermissionError,
-                    ConnectionError,
-                    FileNotFoundError,
-                ) as e:
-                    logger.error(e)
+        self._saved_smb_clients()
+        self._remount_task = asyncio.create_task(self._smb_remount_loop())
         await self._smb.samba_status()
         logger.info("Started")
 
@@ -100,6 +175,10 @@ class StorageExtension(SourceActor):
         pass
 
     async def on_stop(self):
+        if self._remount_task:
+            self._remount_task.cancel()
+            await asyncio.gather(self._remount_task, return_exceptions=True)
+            self._remount_task = None
         logger.info("Stopped")
 
     async def on_start_service(self):
@@ -187,7 +266,16 @@ class StorageExtension(SourceActor):
         return self._smb.add_shared(ip, username, password)
 
     async def on_mount_shared(self, devs: list[str]):
-        return await self._smb.mount_shared(devs)
+        # Remount must reuse saved SMB credentials; the UI only sends URIs.
+        config_smb_clients = self._saved_smb_clients()
+        for dev in devs:
+            creds = config_smb_clients.get(dev) or {}
+            await self._smb.mount_shared(
+                devs=[dev],
+                username=creds.get("username"),
+                password=creds.get("password", ""),
+            )
+        return True
 
     async def on_unmount_shared(self, dev: str):
         return await self._smb.unmount_shared(dev)
