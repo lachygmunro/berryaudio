@@ -47,7 +47,7 @@ exec chromium \
   --kiosk \
   --app=http://127.0.0.1/ \
   --touch-events=enabled \
-  --force-device-scale-factor=1 \
+  --force-device-scale-factor=1.2 \
   --window-position=0,0 \
   --window-size=1024,600 \
   --no-first-run \
