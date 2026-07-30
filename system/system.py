@@ -64,36 +64,22 @@ class SystemExtension(Actor):
         time = now.strftime("%Y-%m-%dT%H:%M:%S")
         return time
 
-    async def on_standby(self, clear_source: bool = True):
-        if self._power_state == "standby":
-            # UI standby button toggles; wake without clearing the active source.
-            return await self.on_wake()
+    async def on_standby(self):
+        if self._power_state is None:
+            self._power_state = "standby"
+            logger.info("System going into Standby...")
+        else:
+            self._power_state = None
+            logger.info("System wakeup...")
 
-        self._power_state = "standby"
-        logger.info("System going into Standby...")
         self._core.send(
             target=["web", "display"],
             event="system_power_state_changed",
             state=self._power_state,
         )
-        # Idle timeout should not tear down the current source (e.g. Library).
-        # Manual power-menu standby still clears by default.
-        if clear_source:
-            await self._core.request("source.set", uri=None)
-            await self._core.request("bluetooth.adapter_set_state", state=False)
-        return True
 
-    async def on_wake(self):
-        if self._power_state != "standby":
-            return True
-
-        self._power_state = None
-        logger.info("System wakeup...")
-        self._core.send(
-            target=["web", "display"],
-            event="system_power_state_changed",
-            state=self._power_state,
-        )
+        await self._core.request("source.set", uri=None)
+        await self._core.request("bluetooth.adapter_set_state", state=False)
         return True
 
     def on_power_state(self):
