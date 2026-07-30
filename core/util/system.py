@@ -72,6 +72,21 @@ class SystemUtil:
             raise
 
     async def write_xinitrc(self, xrandr: str = None, path: str = "/home/pi/.xinitrc"):
+        # pi-kiosk-setup.sh marks ~/.xinitrc immutable so Electron cannot
+        # overwrite Chromium kiosk; skip quietly when that lock is present.
+        try:
+            attrs = subprocess.run(
+                ["lsattr", path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if attrs.returncode == 0 and " i" in f" {attrs.stdout.split()[0]} ":
+                logger.info("Skipping write_xinitrc; %s is immutable", path)
+                return
+        except (OSError, IndexError):
+            pass
+
         if os.path.exists(path):
             shutil.copy(path, f"{path}.bak")
 
@@ -95,6 +110,7 @@ class SystemUtil:
                 'TID=$(xinput list | sed -n \'s/.*QDTECH.*id=\\([0-9]\\+\\).*/\\1/p\')',
                 'OUT=$(xrandr --query | awk \'/ connected/{print $1; exit}\')',
                 '[ -n "$TID" ] && [ -n "$OUT" ] && xinput map-to-output "$TID" "$OUT"',
+                "pkill -f 'berryaudio-.*\\.AppImage' >/dev/null 2>&1 || true",
                 "exec chromium \\",
                 "  --kiosk \\",
                 "  --app=http://127.0.0.1/ \\",

@@ -28,6 +28,11 @@ else
   echo "    Created .bash_profile with startx -- -nocursor"
 fi
 
+echo "==> Stopping competing UIs (Electron AppImage + extra Chromium)"
+pkill -f 'berryaudio-.*\.AppImage' 2>/dev/null || true
+pkill -f 'ba-frontend' 2>/dev/null || true
+# Leave a single clean Chromium restart to reboot / startx
+
 echo "==> Writing ~/.xinitrc for HDMI-1 QDTECH panel"
 sudo chattr -i "$HOME/.xinitrc" 2>/dev/null || true
 cat > "$HOME/.xinitrc" << 'EOF'
@@ -42,6 +47,9 @@ xrandr --output HDMI-1 --primary --mode 1024x600 --pos 0x0 || xrandr --output HD
 
 TID=$(xinput list | sed -n 's/.*QDTECH.*id=\([0-9]\+\).*/\1/p')
 [ -n "$TID" ] && xinput map-to-output "$TID" HDMI-1
+
+# Never let stock Electron race Chromium for the display
+pkill -f 'berryaudio-.*\.AppImage' >/dev/null 2>&1 || true
 
 exec chromium \
   --kiosk \
@@ -58,6 +66,9 @@ EOF
 chmod +x "$HOME/.xinitrc"
 sudo chattr +i "$HOME/.xinitrc"
 
+echo "==> Current UI processes (expect only chromium after reboot):"
+ps aux | egrep 'chromium|AppImage|electron' | grep -v egrep || true
+echo
 echo "==> Done"
 echo "Reboot with: sudo reboot"
 echo "If BerryAudio overwrites display settings, pick:"
