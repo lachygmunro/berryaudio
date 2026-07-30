@@ -24,7 +24,7 @@ class NetworkExtension(Actor):
         self._db = db
         self._config = config
         self._apmode_enabled = bool(
-            self._config.get("network", {}).get("apmode_enabled", False)
+            self._config.get("network", {}).get("apmode_enabled", True)
         )
         self._apmode_password = str(self._config["network"]["apmode_password"])
         self._hostname = str(self._config["system"]["hostname"])
